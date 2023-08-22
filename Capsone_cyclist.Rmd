@@ -1,0 +1,228 @@
+---
+title: "Capstone_project"
+author: "Rohit Agrawal"
+date: "30/5/2023"
+output:
+  html_document:
+    df_print: paged
+---
+
+# Customer Analysis of Cyclistic Company
+ 
+This is the case study on a fictional bike-sharing company called Cyclistic (based on real data from Divvy) to answer business questions as the capstone project of my Google Data Analytics Professional Certificate course.
+
+
+## Data Obtaining
+
+The data can be download in the link below:
+https://divvy-tripdata.s3.amazonaws.com/index.html
+
+Data was downloaded from the above link for the last one year (April 2022 to March 2023)
+
+To Join the Data and Convert Dates, Extract Days, SQL was used.
+Data was uploaded in BigQuery and the following SQL query executed.
+
+```
+SELECT
+  ride_id,
+  rideable_type,
+  started_at,
+  DATE(started_at) AS start_date,
+  FORMAT_DATE('%A', started_at) AS start_day_of_week,
+  FORMAT_TIME('%r', TIME(started_at)) AS start_time,
+  DATE(ended_at) AS end_date,
+  FORMAT_DATE('%A', ended_at) AS end_day_of_week,
+  FORMAT_TIME('%r', TIME(ended_at)) AS end_time,
+  ROUND(TIMESTAMP_DIFF(ended_at, started_at, MINUTE)) AS trip_duration,
+  start_station_name,
+  start_station_id,
+  end_station_name,
+  end_station_id,
+  start_lat,
+  start_lng,
+  end_lat,
+  end_lng,
+  member_casual
+FROM (
+--Last Years data joined
+  SELECT *
+  FROM `capstoneproject-396619.cyclist.april22` AS april22
+  UNION ALL
+  SELECT *
+  FROM `capstoneproject-396619.cyclist.may22` AS may22
+  UNION ALL
+  SELECT *
+  FROM `capstoneproject-396619.cyclist.june22` AS june22
+  UNION ALL
+  SELECT *
+  FROM `capstoneproject-396619.cyclist.july22` AS july22
+  UNION ALL
+  SELECT *
+  FROM `capstoneproject-396619.cyclist.aug22` AS aug22
+  UNION ALL
+  SELECT *
+  FROM `capstoneproject-396619.cyclist.sep22` AS sep22
+  UNION ALL
+  SELECT *
+  FROM `capstoneproject-396619.cyclist.oct22` AS oct22
+  UNION ALL
+  SELECT *
+  FROM `capstoneproject-396619.cyclist.nov22` AS nov22
+  UNION ALL
+  SELECT *
+  FROM `capstoneproject-396619.cyclist.dec22` AS dec22
+  UNION ALL
+  SELECT *
+  FROM `capstoneproject-396619.cyclist.jan23` AS jan23
+  UNION ALL
+  SELECT *
+  FROM `capstoneproject-396619.cyclist.feb23` AS feb23
+  UNION ALL
+  SELECT *
+  FROM `capstoneproject-396619.cyclist.mar23` AS mar23
+  WHERE
+    ROUND(TIMESTAMP_DIFF(ended_at, started_at, MINUTE)) > 0
+    --Filtered out any trips with a negative or zero (0) minute duration
+) AS cyclist2223;
+```
+
+The downloaded data was then loaded in R for further Analysis.
+
+
+### Load packages
+```{r}
+library(tidyverse)
+library(lubridate)
+library(dplyr)
+library(ggplot2)
+library(readr)
+```
+
+### Import Data
+
+```{r}
+data = read.csv("C:\\Users\\dell\\Desktop\\Cyclist\\cyclist.csv")
+```
+
+### Data Exploration
+```{r}
+glimpse(data)
+```
+
+
+### Descriptive Analysis
+```{r}
+count(data, rideable_type)
+mean(data$trip_duration)
+
+range(data$trip_duration)
+```
+Few Durations are in negative, Might be some error. Take absolute values of them.
+```{r}
+data$trip_duration <- abs(data$trip_duration)
+range(data$trip_duration)
+```
+
+
+```{r}
+mode_day = function(){
+  return(sort(-table(data$start_day_of_week))[1])
+}
+mode_day()
+
+member_counts <- count(data, member_casual)
+```
+
+```{r}
+ggplot(member_counts, aes(x = member_casual, y = n, fill = member_casual)) +
+  geom_bar(stat = "identity")+
+  labs(title = "Total Rides by Members and Casual Riders", x = "Rider Type", y = "Total Rides")
+
+```
+
+The above plot shows that
+
+Let's Analyse the Total rides by Days
+
+```{r}
+days_counts <- count(data, start_day_of_week)
+days_order <- c("Sunday", "Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday") 
+
+ggplot(days_counts, aes(x = factor(start_day_of_week, days_order), y = n, fill = days_order)) +
+  geom_bar(stat = "identity")+
+  labs(title = "Rides by Days in week", x = "Days", y = "Total Rides")
+
+```
+
+Break Down each day by Customer Type.
+```{r}
+rides_by_day_member <- data %>%
+  group_by(start_day_of_week, member_casual) %>%
+  summarise(average_rides = n() / n_distinct(start_date)) %>%
+  ungroup() %>%
+  arrange(-average_rides)
+
+print(rides_by_day_member)
+```
+
+
+See how many rides for days of week by customer
+```{r}
+ggplot(rides_by_day_member, aes(x = factor(start_day_of_week, days_order), y = average_rides, fill = member_casual)) +
+  geom_bar(stat = "identity")+
+  labs(title = "Rides by Days in week and member", x = "Days", y = "Total Rides")
+```
+We can see that on Saturday and Sundays, the number of rides by casual rides are of higer proportion wrt other days.
+
+
+
+Analying how customer takes rides on Different times of each days.
+
+```{r}
+data$start_time <- as.POSIXct(data$start_time, format = "%I:%M:%S %p")
+ride_by_hours_days <- data %>%
+  mutate(start_hour = hour(start_time),
+         start_day_of_week = factor(start_day_of_week,days_order)) %>%
+  group_by(member_casual, start_hour, start_day_of_week) %>%
+  summarise(total_rides = n()) %>%
+  arrange(member_casual, start_hour, start_day_of_week)
+
+ride_by_hours_days
+```
+
+```{r}
+ggplot(ride_by_hours_days, aes(x = start_hour, y = total_rides, color = member_casual)) +
+  geom_line(linewidth = 1) +
+  facet_wrap(~ start_day_of_week, ncol = 3, scales = "free_x") +
+  labs(x = "Hour of the Day", y = "Total Rides", color = "Member/Casual") +
+  ggtitle("Total Rides by Hour of the Day")
+```
+
+
+Here and interesting thing comes up. During weekdays, there two modes are present on each working day.
+That might be due to the working class people who use bikes to commute to and from work.
+
+On Sundays and Saturdays, similar behaviour is seem by members and non members.
+
+Let's see Average duration of rides.
+```{r}
+rides_by_duration_member <- data %>%
+  group_by(member_casual) %>%
+  summarise(average_duration = sum(trip_duration) / n()) %>%
+  ungroup() %>%
+  arrange(-average_duration)
+rides_by_duration_member
+```
+
+```{r}
+ggplot(rides_by_duration_member, aes(x = member_casual, y = average_duration, fill = member_casual)) +
+  geom_bar(stat = "identity")+
+  labs(title = "Average duration of Rides", x = "Rider Type", y = "Average Duration")
+```
+Although the number of rides by casual riders were less but the average duration of the rides are more than that of members.
+
+
+## Conclusions and Recommendations.
+1. Members dominate Cyclistic's Rides number and they ride significantly more than casual riders.
+2. Casual Riders have more duration of average rides. This might be due to the tendeny of liesure (enjoy the ride) by slow pace.
+3. Weekend Membership Option can be great option those riders who ride only on weekend.
